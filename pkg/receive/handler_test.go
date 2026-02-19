@@ -41,6 +41,7 @@ import (
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -2054,4 +2055,133 @@ func startIngestor(logger log.Logger, serverAddress string, delay time.Duration)
 		}
 	}()
 	return srv
+}
+
+func TestTest(t *testing.T) {
+	v2 := &prompb.WriteRequest{
+		Timeseries: []prompb.TimeSeries{
+			{
+				Labels: []labelpb.ZLabel{
+					{Name: "__name__", Value: "test"},
+				},
+			},
+			{
+				Labels: []labelpb.ZLabel{
+					{Name: "__name__", Value: "test"},
+				},
+			},
+		},
+	}
+	binary, _ := v2.Marshal()
+
+	v1 := &prompb.WriteRequest{
+		Timeseries: []prompb.TimeSeries{
+			{
+				Labels: []labelpb.ZLabel{
+					{Name: "__name__", Value: "test"},
+				},
+			},
+			{
+				Labels: []labelpb.ZLabel{
+					{Name: "__name__", Value: "test"},
+				},
+			},
+			{
+				Labels: []labelpb.ZLabel{
+					{Name: "__name__", Value: "test"},
+				},
+			},
+		},
+		Metadata: []prompb.MetricMetadata{
+			{
+				Help: "test",
+			},
+			{
+				Help: "test",
+			},
+		},
+	}
+
+	assert.Equal(t, 3, cap(v1.Timeseries))
+	assert.Equal(t, 2, cap(v1.Metadata))
+
+	v1.Timeseries = v1.Timeseries[:0]
+	v1.Metadata = v1.Metadata[:0]
+
+	assert.Equal(t, 3, cap(v1.Timeseries))
+	assert.Equal(t, 2, cap(v1.Metadata))
+
+	v1.Unmarshal(binary)
+
+	assert.Equal(t, 3, cap(v1.Timeseries))
+	assert.Equal(t, 2, cap(v1.Metadata))
+
+	v1.Reset()
+	assert.Equal(t, 0, cap(v1.Timeseries))
+	assert.Equal(t, 0, cap(v1.Metadata))
+}
+
+// This benchmark is here to proove that pooling a WriteRequest with Reset()
+// is not an optimal solution compared to manually resetting the underlying slices
+// while retaining their capacity.
+// BenchmarkWriteRequestPoolingStrategy/full_reset-32      16148253  360.4 ns/op  352 B/op  4 allocs/op
+// BenchmarkWriteRequestPoolingStrategy/partial_reset-32   34007589  175.4 ns/op   64 B/op  2 allocs/op
+func BenchmarkWriteRequestPoolingStrategy(b *testing.B) {
+	v2 := &prompb.WriteRequest{
+		Timeseries: []prompb.TimeSeries{
+			{
+				Labels: []labelpb.ZLabel{
+					{Name: "__name__", Value: "test"},
+				},
+			},
+			{
+				Labels: []labelpb.ZLabel{
+					{Name: "__name__", Value: "test"},
+				},
+			},
+		},
+	}
+	binary, _ := v2.Marshal()
+
+	v1 := &prompb.WriteRequest{
+		Timeseries: []prompb.TimeSeries{
+			{
+				Labels: []labelpb.ZLabel{
+					{Name: "__name__", Value: "test"},
+				},
+			},
+			{
+				Labels: []labelpb.ZLabel{
+					{Name: "__name__", Value: "test"},
+				},
+			},
+			{
+				Labels: []labelpb.ZLabel{
+					{Name: "__name__", Value: "test"},
+				},
+			},
+		},
+		Metadata: []prompb.MetricMetadata{
+			{
+				Help: "test",
+			},
+			{
+				Help: "test",
+			},
+		},
+	}
+
+	b.Run("full reset", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			v1.Reset()
+			_ = v1.Unmarshal(binary)
+		}
+	})
+	b.Run("partial reset", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			v1.Timeseries = v1.Timeseries[:0]
+			v1.Metadata = v1.Metadata[:0]
+			_ = v1.Unmarshal(binary)
+		}
+	})
 }
